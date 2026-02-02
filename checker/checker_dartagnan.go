@@ -33,6 +33,7 @@ type DartagnanChecker struct {
 func init() {
 	tools.RegEnv("DARTAGNAN_HOME", "/usr/share/dat3m", "Path to DAT3M_HOME")
 	tools.RegEnv("DARTAGNAN_CAT_PATH", "", "Path to custom .cat files")
+	tools.RegEnv("DARTAGNAN_CONFIGURATION", "./dartagnan.properties", "Path to the dartagnan.properties file")
 }
 
 // NewDartagnan creates a new checker using Dartagnan model checker.
@@ -109,7 +110,7 @@ func catFilePath(mm MemoryModel) string {
 func (c *DartagnanChecker) run(ctx context.Context, testFn string) (string, error) {
 
 	opts := []string{
-		"dartagnan.properties",
+		tools.GetEnv("DARTAGNAN_CONFIGURATION"),
 		"--bound.load=bound.csv",
 		"--bound.save=bound.csv",
 		fmt.Sprintf("--target=%s", models[c.mm].arch),
