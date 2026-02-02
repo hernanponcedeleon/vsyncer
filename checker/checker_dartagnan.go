@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"path/filepath"
 	"strings"
-
+	"github.com/google/shlex"
 	"vsync/logger"
 	"vsync/tools"
 )
@@ -31,9 +31,11 @@ type DartagnanChecker struct {
 }
 
 func init() {
+	tools.RegEnv("DARTAGNAN_CMD", "dartagnan",
+		"Full command to run dartagnan either in native or jvm mode (e.g., $DARTAGNAN_HOME/dartagnan/target/dartagnan or java -jar $DARTAGNAN_HOME/dartagnan/target/dartagnan.jar)")
 	tools.RegEnv("DARTAGNAN_HOME", "/usr/share/dat3m", "Path to DAT3M_HOME")
 	tools.RegEnv("DARTAGNAN_CAT_PATH", "", "Path to custom .cat files")
-	tools.RegEnv("DARTAGNAN_CONFIGURATION", "./dartagnan.properties", "Path to the dartagnan.properties file")
+	tools.RegEnv("DARTAGNAN_CONFIGURATION", "./checker/dartagnan.properties", "Path to the dartagnan.properties file")
 }
 
 // NewDartagnan creates a new checker using Dartagnan model checker.
@@ -46,25 +48,42 @@ func NewDartagnan(mm MemoryModel) *DartagnanChecker {
 }
 
 func (c *DartagnanChecker) setVersion() {
-	dartagnanHome := tools.GetEnv("DARTAGNAN_HOME")
-	ctx := context.Background()
-	ostr, err := exec.CommandContext(ctx, dartagnanHome + "/dartagnan/target/dartagnan", "--version").CombinedOutput()
-	if err != nil {
-		logger.Fatalf("could not run dartagnan: %v", string(ostr))
-	}
-	r, err := regexp.Compile("(\\d+)\\.(\\d+)(\\.(\\d+))?")
-	if err != nil {
-		logger.Fatalf("could not parse dartagnan version: %v", err)
-	}
-	grps := r.FindStringSubmatch(string(ostr))
-	if len(grps) != 5 {
-		logger.Fatalf("unexpected dartagnan version format: %v", grps)
-	}
-	c.version.major, _ = strconv.Atoi(grps[1])
-	c.version.minor, _ = strconv.Atoi(grps[2])
-	// group 3 is the optional dot so we skip it
-	c.version.patch, _ = strconv.Atoi(grps[4])
-	logger.Debugf("Detected dartagnan version %d.%d.%d\n", c.version.major, c.version.minor, c.version.patch)
+    ctx := context.Background()
+
+    cmdStr := tools.GetEnv("DARTAGNAN_CMD")
+    baseCmd, err := shlex.Split(cmdStr)
+    if err != nil {
+        logger.Fatalf("invalid DARTAGNAN_CMD: %v", err)
+    }
+    if len(baseCmd) == 0 {
+        logger.Fatalf("DARTAGNAN_CMD is empty")
+    }
+
+    cmd := append(baseCmd, "--version")
+
+    ostr, err := exec.CommandContext(ctx, cmd[0], cmd[1:]...).CombinedOutput()
+    if err != nil {
+        logger.Fatalf("could not run dartagnan --version: %s", string(ostr))
+    }
+
+    r := regexp.MustCompile(`(\d+)\.(\d+)(?:\.(\d+))?`)
+    grps := r.FindStringSubmatch(string(ostr))
+    if len(grps) != 4 {
+        logger.Fatalf("unexpected dartagnan version format: %q", string(ostr))
+    }
+
+    c.version.major, _ = strconv.Atoi(grps[1])
+    c.version.minor, _ = strconv.Atoi(grps[2])
+    if grps[3] != "" {
+        c.version.patch, _ = strconv.Atoi(grps[3])
+    }
+
+    logger.Debugf(
+        "Detected dartagnan version %d.%d.%d",
+        c.version.major,
+        c.version.minor,
+        c.version.patch,
+    )
 }
 
 func (c *DartagnanChecker) GetVersion() string {
@@ -108,26 +127,34 @@ func catFilePath(mm MemoryModel) string {
 }
 
 func (c *DartagnanChecker) run(ctx context.Context, testFn string) (string, error) {
+    opts := []string{
+        tools.GetEnv("DARTAGNAN_CONFIGURATION"),
+        "--bound.load=bound.csv",
+        "--bound.save=bound.csv",
+        fmt.Sprintf("--target=%s", models[c.mm].arch),
+        catFilePath(c.mm),
+    }
 
-	opts := []string{
-		tools.GetEnv("DARTAGNAN_CONFIGURATION"),
-		"--bound.load=bound.csv",
-		"--bound.save=bound.csv",
-		fmt.Sprintf("--target=%s", models[c.mm].arch),
-		catFilePath(c.mm),
-	}
+    cmdStr := tools.GetEnv("DARTAGNAN_CMD")
 
-	dartagnanHome := tools.GetEnv("DARTAGNAN_HOME")
-	cmd := append([]string{
-		dartagnanHome + "/dartagnan/target/dartagnan",
-		"-DlogLevel=INFO",
-		"-Djava.library.path=" + dartagnanHome + "/dartagnan/target/libs/",
-		testFn,
-	}, opts...)
+    baseCmd, err := shlex.Split(cmdStr)
+    if err != nil {
+        return "", fmt.Errorf("invalid DARTAGNAN_CMD: %w", err)
+    }
+    if len(baseCmd) == 0 {
+        return "", fmt.Errorf("DARTAGNAN_CMD is empty")
+    }
 
-	logger.Debug(cmd) // just a message
-	out, err := exec.CommandContext(ctx, cmd[0], cmd[1:]...).CombinedOutput()
-	return string(out), err
+    cmd := append(baseCmd,
+        "-Djava.library.path="+tools.GetEnv("DARTAGNAN_HOME")+"/dartagnan/target/libs/",
+        testFn,
+    )
+    cmd = append(cmd, opts...)
+
+    logger.Debug(cmd) // just a message
+
+    out, err := exec.CommandContext(ctx, cmd[0], cmd[1:]...).CombinedOutput()
+    return string(out), err
 }
 
 // Check performs a check run with Dartagnan

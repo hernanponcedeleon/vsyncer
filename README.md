@@ -55,7 +55,7 @@ To select a specific Docker image tag set `DOCKER_TAG` when installing
 To run `vsyncer` without Docker, you'll need the following tools:
 
 - clang and llvm >= v14
-- Dartagnan >= v4.0.1 (alternative)
+- Dartagnan >= v4.4.0 (alternative)
 - GenMC >= v0.9 (alternative)
 
 When installing `vsyncer` from source, set `USE_DOCKER=false` so that
