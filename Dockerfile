@@ -63,18 +63,37 @@ RUN /usr/share/genmc9/bin/genmc --version
 ################################################################################
 FROM builder AS dat3m_builder
 
+ARG JAVA_VERSION=21
+ARG TARGETARCH
+
 RUN apt-get update  \
  && apt-get install -y --no-install-recommends \
      graphviz \
      maven \
      autoconf \
      automake  \
-     openjdk-17-jdk \
-     openjdk-17-jre \
+     zlib1g-dev \
+     curl \
  && rm -rf /var/lib/apt/lists/*
 
+# Install GraalVM
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64)  GRAAL_ARCH="linux-x64" ;; \
+      arm64)  GRAAL_ARCH="linux-aarch64" ;; \
+      *)      echo "Unsupported arch: $TARGETARCH" && exit 1 ;; \
+    esac; \
+    mkdir -p /home/graalvm-jdk-${JAVA_VERSION}; \
+    curl -fsSL \
+      https://download.oracle.com/graalvm/${JAVA_VERSION}/latest/graalvm-jdk-${JAVA_VERSION}_${GRAAL_ARCH}_bin.tar.gz \
+    | tar -xz --strip-components=1 -C /home/graalvm-jdk-${JAVA_VERSION}
+
+ENV GRAALVM_HOME=/home/graalvm-jdk-${JAVA_VERSION}
+ENV JAVA_HOME=$GRAALVM_HOME
+ENV PATH=$GRAALVM_HOME/bin:$PATH
+
 RUN cd /tmp \
- && git clone --depth 1 --branch "4.3.0" \
+ && git clone --depth 1 --branch "4.3.2" \
      https://github.com/hernanponcedeleon/dat3m.git
 
 RUN cd /tmp/dat3m \
