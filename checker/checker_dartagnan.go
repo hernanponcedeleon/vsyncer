@@ -131,8 +131,6 @@ func catFilePath(mm MemoryModel) string {
 func (c *DartagnanChecker) run(ctx context.Context, testFn string) (string, error) {
 	opts := []string{
 		tools.GetEnv("DARTAGNAN_CONFIGURATION"),
-		"--bound.load=bound.csv",
-		"--bound.save=bound.csv",
 		fmt.Sprintf("--target=%s", models[c.mm].arch),
 		catFilePath(c.mm),
 	}
