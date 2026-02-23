@@ -6,6 +6,7 @@ package checker
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -37,7 +38,7 @@ func init() {
 	tools.RegEnv("DARTAGNAN_OPTIONS", "",
 		"Options passed to Dartagnan in additon to the default options")
 	tools.RegEnv("DARTAGNAN_CAT_PATH", "", "Path to custom .cat files")
-	tools.RegEnv("DARTAGNAN_CONFIGURATION", "./checker/dartagnan.properties", "Path to the dartagnan.properties file")
+	tools.RegEnv("DARTAGNAN_CONFIGURATION", "", "Path to the dartagnan.properties file")
 }
 
 // NewDartagnan creates a new checker using Dartagnan model checker.
@@ -68,7 +69,7 @@ func (c *DartagnanChecker) setVersion() {
 		logger.Fatalf("could not run dartagnan --version: %s", string(ostr))
 	}
 
-	r := regexp.MustCompile(`(\d+)\.(\d+)(?:\.(\d+))?`)
+	r := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:(?:-[0-9A-Za-z.-]+)? \(commit [0-9a-f]{7,40}\))?\n?$`)
 	grps := r.FindStringSubmatch(string(ostr))
 	if len(grps) != 4 {
 		logger.Fatalf("unexpected dartagnan version format: %q", string(ostr))
@@ -129,12 +130,16 @@ func catFilePath(mm MemoryModel) string {
 }
 
 func (c *DartagnanChecker) run(ctx context.Context, testFn string) (string, error) {
-	opts := []string{
-		tools.GetEnv("DARTAGNAN_CONFIGURATION"),
+	opts := []string{}
+	if config := tools.GetEnv("DARTAGNAN_CONFIGURATION"); config != "" {
+		if info, err := os.Stat(config); err == nil && !info.IsDir() {
+			opts = append(opts, config)
+		}
+	}
+	opts = append(opts,
 		fmt.Sprintf("--target=%s", models[c.mm].arch),
 		catFilePath(c.mm),
-	}
-
+	)
 	if env := tools.GetEnv("DARTAGNAN_OPTIONS"); env != "" {
 		opts = append(opts, strings.Split(env, " ")...)
 	}
