@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"path/filepath"
 	"strings"
-
+	"github.com/google/shlex"
 	"vsync/logger"
 	"vsync/tools"
 )
@@ -32,7 +32,8 @@ type DartagnanChecker struct {
 
 func init() {
 	tools.RegEnv("DARTAGNAN_JAVA_CMD", "java", "Path to java binary")
-
+	tools.RegEnv("DARTAGNAN_CMD", "/usr/share/dat3m/dartagnan/target/dartagnan",
+		"Full command to run dartagnan either in native or jvm mode (e.g., \"<path-to-binary>/dartagnan\" or \"java -jar <path-to-jar>/dartagnan.jar\")")
 	tools.RegEnv("DARTAGNAN_HOME", "/usr/share/dat3m", "Path to DAT3M_HOME")
 	tools.RegEnv("DARTAGNAN_OPTIONS", "",
 		"Options passed to Dartagnan in additon to the default options")
@@ -53,32 +54,42 @@ func NewDartagnan(mm MemoryModel) *DartagnanChecker {
 }
 
 func (c *DartagnanChecker) setVersion() {
-	dartagnanHome := tools.GetEnv("DARTAGNAN_HOME")
-	args := append([]string{"-jar",
-		dartagnanHome + "/dartagnan/target/dartagnan.jar", "--version",
-	})
 	ctx := context.Background()
-	javaCmd, err := tools.FindCmd("DARTAGNAN_JAVA_CMD")
+
+	cmdStr := tools.GetEnv("DARTAGNAN_CMD")
+	baseCmd, err := shlex.Split(cmdStr)
 	if err != nil {
-		logger.Fatalf("could not run java: %v", err)
+		logger.Fatalf("invalid DARTAGNAN_CMD: %v", err)
 	}
-	ostr, err := exec.CommandContext(ctx, javaCmd[0], append(javaCmd[1:], args...)...).CombinedOutput()
+	if len(baseCmd) == 0 {
+		logger.Fatalf("DARTAGNAN_CMD is empty")
+	}
+
+	cmd := append(baseCmd, "--version")
+
+	ostr, err := exec.CommandContext(ctx, cmd[0], cmd[1:]...).CombinedOutput()
 	if err != nil {
-		logger.Fatalf("could not run dartagnan: %v", string(ostr))
+		logger.Fatalf("could not run %s: %s", cmd, string(ostr))
 	}
-	r, err := regexp.Compile("(\\d+)\\.(\\d+)(\\.(\\d+))?")
-	if err != nil {
-		logger.Fatalf("could not parse dartagnan version: %v", err)
-	}
+
+	r := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:(?:-[0-9A-Za-z.-]+)? \(commit [0-9a-f]{7,40}\))?\n?$`)
 	grps := r.FindStringSubmatch(string(ostr))
-	if len(grps) != 5 {
-		logger.Fatalf("unexpected dartagnan version format: %v", grps)
+	if len(grps) != 4 {
+		logger.Fatalf("unexpected dartagnan version format: %q", string(ostr))
 	}
+
 	c.version.major, _ = strconv.Atoi(grps[1])
 	c.version.minor, _ = strconv.Atoi(grps[2])
-	// group 3 is the optional dot so we skip it
-	c.version.patch, _ = strconv.Atoi(grps[4])
-	logger.Debugf("Detected dartagnan version %d.%d.%d\n", c.version.major, c.version.minor, c.version.patch)
+	if grps[3] != "" {
+		c.version.patch, _ = strconv.Atoi(grps[3])
+	}
+
+	logger.Debugf(
+		"Detected dartagnan version %d.%d.%d",
+		c.version.major,
+		c.version.minor,
+		c.version.patch,
+	)
 }
 
 func (c *DartagnanChecker) GetVersion() string {
@@ -122,9 +133,7 @@ func catFilePath(mm MemoryModel) string {
 }
 
 func (c *DartagnanChecker) run(ctx context.Context, testFn string) (string, error) {
-
 	opts := []string{
-		"--encoding.wmm.idl2sat=true",
 		"--bound.load=bound.csv",
 		"--bound.save=bound.csv",
 		fmt.Sprintf("--target=%s", models[c.mm].arch),
@@ -132,33 +141,36 @@ func (c *DartagnanChecker) run(ctx context.Context, testFn string) (string, erro
 	}
 
 	if env := tools.GetEnv("DARTAGNAN_OPTIONS"); env != "" {
-		opts = append(opts, strings.Split(env, " ")...)
+		if extra, err := shlex.Split(env); err == nil {
+			opts = append(opts, extra...)
+		}
 	}
 
 	if env := tools.GetEnv("DARTAGNAN_SET_OPTIONS"); env != "" {
-		opts = strings.Split(env, " ")
+		if override, err := shlex.Split(env); err == nil {
+			opts = override
+		}
 	}
 
-	if env := tools.GetEnv("DARTAGNAN_SOLVER"); env != "" {
-		opts = append(opts, fmt.Sprintf("--solver=%s", env))
+	if solver := tools.GetEnv("DARTAGNAN_SOLVER"); solver != "" {
+		opts = append(opts, fmt.Sprintf("--solver=%s", solver))
 	}
 
-	if env := tools.GetEnv("DARTAGNAN_BOUND"); env != "" {
-		opts = append(opts, fmt.Sprintf("--bound=%s", env))
+	if bound := tools.GetEnv("DARTAGNAN_BOUND"); bound != "" {
+		opts = append(opts, fmt.Sprintf("--bound=%s", bound))
 	}
 
-	dartagnanHome := tools.GetEnv("DARTAGNAN_HOME")
-	args := append([]string{"-jar",
-		dartagnanHome + "/dartagnan/target/dartagnan.jar",
-		testFn,
-	}, opts...)
+	args := append([]string{testFn}, opts...)
 
-	javaCmd, err := tools.FindCmd("DARTAGNAN_JAVA_CMD")
+	dartagnanCmd, err := tools.FindCmd("DARTAGNAN_CMD")
 	if err != nil {
 		return "", err
 	}
-	logger.Debug(append(javaCmd, args...)) // just a message
-	out, err := exec.CommandContext(ctx, javaCmd[0], append(javaCmd[1:], args...)...).CombinedOutput()
+
+	fullCmd := append(dartagnanCmd, args...)
+	logger.Debug(fullCmd)
+
+	out, err := exec.CommandContext(ctx, fullCmd[0], fullCmd[1:]...).CombinedOutput()
 	return string(out), err
 }
 

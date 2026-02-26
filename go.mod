@@ -22,6 +22,7 @@ require (
 	github.com/fatih/gomodifytags v1.16.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
